@@ -1,82 +1,187 @@
-<img src="https://github.com/sipcapture/homer7-docker/assets/1423657/36a8e515-ab0e-482b-bf49-2156e290c764" height=200><img src="https://github.com/sipcapture/homer-docker/assets/1423657/8997d282-0c29-4137-a1ef-e9be79a54284" height=200/>
+# Homer 10 — Production SIP Capture
 
+HOMER 10 stack for capturing SIP traffic from Kamailio via HEP/UDP, storing in ClickHouse, and visualizing in Grafana.
 
+Based on [sipcapture/homer-docker](https://github.com/sipcapture/homer-docker). Stripped down for production — no demo services, secrets externalized, configurable via `.env`.
 
-# homer 10 + qryn (all-in-one)
-The ultimate  **homer** + **qryn.js** docker demo w/ sample _hep traffic, logs, traces and metrics_ - _batteries included!_ :battery::battery:
+## Architecture
 
-- HOMER 10 = _qryn.js + heplify-server + clickhouse-server + grafana-server_
+```
+Kamailio SBC ──HEP/UDP──▶ heplify-server ──Loki push──▶ qryn ──▶ ClickHouse
+                                  │                        │
+                             metrics:9096             Loki/Tempo/Prom API
+                                  │                        │
+                               Vector ──prom write──▶   Grafana :3000
+                                  │
+                             node-exporter
+```
 
-> All the backend features for all supported protocols are provided by **qryn** and **clickhouse** - no other components required!
+### Services (6 containers)
 
-<br />
+| Service | Role | Port |
+|---------|------|------|
+| **clickhouse-server** | Time-series database | internal only |
+| **qryn** | Polyglot API (Loki/Tempo/Prometheus) | internal only |
+| **heplify-server** | HEP receiver (SIP capture) | `${HEP_LISTEN}` (default `127.0.0.1:9060/udp`) |
+| **grafana** | Dashboards & UI | `${GRAFANA_LISTEN}` (default `0.0.0.0:3000`) |
+| **vector** | Metrics scraping & forwarding | internal only |
+| **node-exporter** | Host system metrics | internal only |
 
-<img src="https://user-images.githubusercontent.com/1423657/259414028-ce4c8603-be1f-4ca9-a0fa-556d84c5660c.gif" width=600 />
+## Quick Start
 
-<img src="https://github.com/sipcapture/homer-docker/assets/1423657/caf2c6c3-b4e0-45ae-9ac9-e88ed23f4b52" width=600 />
-
-<img src="https://user-images.githubusercontent.com/1423657/186014786-165b18da-e808-4cf7-a6fc-eb90df705400.gif" width=600 />
-
-<br>
-
-### Usage
-
-#### Setup
-Clone the repository and launch the **qryn** polyglot demo using _docker-compose_
+### 1. Configure
 
 ```bash
-docker-compose pull 
-docker-compose up -d
+cp .env.example .env
+nano .env
 ```
 
-#### Send Data
-This demo comes with auto-generated data, but you can still send your own streams
-##### HEP
-Send some HEP traffic to the HEP socket on port 9060/udp or 9061/tcp or use the demo `hepgen` generated traffic
+Set your passwords and network config in `.env`:
 
-##### Others
-Send data using a variety of protocols
+```env
+# Grafana
+ADMIN_USER=admin
+ADMIN_PASSWORD=<strong-password>
+GRAFANA_ROOT_URL=http://<your-server-ip>:3000
+GRAFANA_LISTEN=0.0.0.0:3000
 
-<a href="https://qryn.metrico.in" target="_blank">
-<img src="https://github.com/metrico/qryn-docs/blob/main/docs/resources/images/qryn_logo_trans.png?raw=true" width=50 />&nbsp;
-<img src="https://user-images.githubusercontent.com/1423657/184496222-ca95d80c-906f-4c77-a963-86f0b27a56b0.png" width=50 />&nbsp;
-<img src="https://user-images.githubusercontent.com/1423657/184496304-4f35a365-efdc-4dca-9771-6b7b1deb9ae3.png" width=50 />&nbsp;
-<img src="https://user-images.githubusercontent.com/1423657/184496174-aca323dd-f40e-489a-a584-fa7348c0eab0.png" width=50 />&nbsp;
-<img src="https://user-images.githubusercontent.com/1423657/184496973-9f46e551-872d-4a25-877c-51a2e5f53e84.png" width=50 />&nbsp;
-<img src="https://user-images.githubusercontent.com/1423657/184494381-15d20f5d-3d52-411b-9064-dfd2ccea7c1c.png" width=50 />&nbsp;
-<img src="https://user-images.githubusercontent.com/1423657/184494438-17d7ceb0-a62a-4819-9b1c-43d7f0baf802.png" width=50 />&nbsp;
-<img src="https://avatars.githubusercontent.com/u/54801242?s=200&v=4" width=50 /><br/>
-</a>
+# ClickHouse (must match across both vars)
+CLICKHOUSE_USER=qryn
+CLICKHOUSE_PASSWORD=<strong-password>
+CLICKHOUSE_AUTH=qryn:<strong-password>
 
-
-#### Login 
-Access the preconfigured Grafana instance as `admin/admin`
+# HEP listener
+# 127.0.0.1:9060 — Kamailio on same host (localhost)
+# 0.0.0.0:9060   — Kamailio on a remote server
+HEP_LISTEN=127.0.0.1:9060
 ```
-http://localhost:3000
+
+### 2. Start
+
+```bash
+docker compose pull
+docker compose up -d
+docker compose ps    # all 6 services should be running
 ```
-#### Explore
-The demo generates correlated _logs, metrics and traces_ with autoconfigured datasources
 
-  - ```Loki```
-  - ```Tempo```
-  - ```Prometheus```
-  - ```Flux```
+### 3. Access Grafana
 
-#### Data Ingestion
-The demo supports all ingestion protocols supported by **homer** _(hep)_ and **qryn** _(logql, prometheus, influx, elastic, opentelemetry, etc)_
+Open `http://<your-server-ip>:3000` and login with the credentials from `.env`.
 
+Test datasources: **Settings → Data Sources → Test** each (Loki, Prometheus, Tempo).
 
-#### Go Pro
-Loving it? Learn how to send your own data using our [online documentation](https://qryn.metrico.in) 
+### 4. Configure Kamailio to send HEP
 
-<br>
+Add to your Kamailio configuration (`kamailio.cfg`):
 
-![image](https://github.com/sipcapture/homer-docker/assets/1423657/a3ed8398-4930-4c00-a593-782ce1696756)
+```kamailio
+# ---- HEP / Homer tracing ----
+loadmodule "siptrace.so"
 
-![image](https://user-images.githubusercontent.com/1423657/183254312-b52811e5-f563-440e-84e4-8312714a4c9b.png)
+# If Kamailio is on the same host, use 127.0.0.1
+# If remote, use the Homer server's IP
+modparam("siptrace", "duplicate_uri", "sip:127.0.0.1:9060;transport=udp")
+modparam("siptrace", "hep_mode_on", 1)
+modparam("siptrace", "trace_to_database", 0)
+modparam("siptrace", "hep_version", 3)
+modparam("siptrace", "hep_capture_id", 100)
+modparam("siptrace", "trace_on", 1)
+```
 
-![image](https://user-images.githubusercontent.com/1423657/183254290-fac87747-51ce-4648-a7aa-073fdcdd6c10.png)
+Then call `sip_trace()` in your routing logic:
 
-![image](https://user-images.githubusercontent.com/1423657/186708038-685467ee-a135-4fa0-af31-eae487da2139.png)
+```kamailio
+request_route {
+    sip_trace();
+    # ... rest of your routing logic
+}
 
-![image](https://user-images.githubusercontent.com/1423657/186280231-8fbcf1f1-69b7-43fe-91ad-7e6ee8389978.png)
+onreply_route {
+    sip_trace();
+}
+
+failure_route {
+    sip_trace();
+}
+```
+
+Restart Kamailio:
+
+```bash
+systemctl restart kamailio
+```
+
+Make a test SIP call and check the **SIP Overview** dashboard in Grafana.
+
+## Alerting (Slack)
+
+Grafana handles alerting natively — **no AlertManager needed**. Grafana's unified alerting can send directly to Slack, email, PagerDuty, webhooks, etc.
+
+Setup via Grafana UI:
+
+1. **Alerting → Contact points → Add contact point**
+2. Select **Slack**, paste your [Incoming Webhook URL](https://api.slack.com/messaging/webhooks), set the channel
+3. **Notification policies** → set the default contact point to your Slack
+4. **Alert rules** → create rules against Loki/Prometheus datasources (e.g., SIP error rate > threshold)
+
+## Dashboards
+
+Pre-provisioned Grafana dashboards:
+
+- **SIP Overview** — ASR, NER, call metrics
+- **Call Flow** — SIP ladder/flow visualization
+- **CDR Search** — Call Detail Records
+- **SIP KPIs / Stats / Error Rates** — Detailed SIP analytics
+- **SIP Method Responses** — Method-level breakdown
+- **SIP Call Register** — Registration tracking
+- **QOS RTCP / XRTP / Horaclifix** — Voice quality metrics
+- **HEP Stats** — HEP protocol statistics
+- **Host Overview** — System metrics (node-exporter)
+
+## Data Retention
+
+Configured to **30 days** via qryn `LABELS_DAYS` and `SAMPLES_DAYS` environment variables. ClickHouse automatically purges data older than 30 days.
+
+## Maintenance
+
+```bash
+# View logs
+docker compose logs -f heplify-server
+docker compose logs -f qryn
+
+# Restart a service
+docker compose restart heplify-server
+
+# Update images
+docker compose pull && docker compose up -d
+
+# Check disk usage
+docker system df
+du -sh /var/lib/docker/volumes/all-in-one_clickhouse_data/
+```
+
+## Configuration Reference
+
+All settings are in `.env` (see `.env.example` for docs):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ADMIN_USER` | `admin` | Grafana admin username |
+| `ADMIN_PASSWORD` | `admin` | Grafana admin password |
+| `GRAFANA_ROOT_URL` | `http://localhost:3000` | Public URL for Grafana (used in alert links) |
+| `GRAFANA_LISTEN` | `0.0.0.0:3000` | Grafana bind address |
+| `CLICKHOUSE_USER` | `qryn` | ClickHouse username |
+| `CLICKHOUSE_PASSWORD` | `changeme` | ClickHouse password |
+| `CLICKHOUSE_AUTH` | `qryn:changeme` | ClickHouse auth string for qryn |
+| `HEP_LISTEN` | `127.0.0.1:9060` | HEP UDP bind address |
+
+## Files
+
+| File | Purpose |
+|------|---------|
+| `docker-compose.yml` | Service definitions (6 containers) |
+| `.env` | Production secrets (not in git) |
+| `.env.example` | Template for `.env` |
+| `vector/vector.toml` | Metrics scraping config |
+| `clickhouse/opentelemetry_zipkin.sql` | ClickHouse init (trace export) |
+| `grafana/provisioning/` | Grafana datasources, dashboards, alerts |
