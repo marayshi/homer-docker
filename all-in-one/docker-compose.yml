@@ -52,11 +52,11 @@ services:
     image: ghcr.io/sipcapture/heplify-server:latest
     container_name: heplify-server
     ports:
-      - "${HEP_LISTEN:-127.0.0.1:9060}:9060/tcp"
+      - "${HEP_LISTEN:-127.0.0.1:9060}:9060/udp"
     command:
       - './heplify-server'
     environment:
-      - "HEPLIFYSERVER_HEPADDR=tcp:0.0.0.0:9060"
+      - "HEPLIFYSERVER_HEPADDR=0.0.0.0:9060"
       - "HEPLIFYSERVER_DBSHEMA=mock"
       - "HEPLIFYSERVER_DBDRIVER=mock"
       - "HEPLIFYSERVER_DBADDR="
